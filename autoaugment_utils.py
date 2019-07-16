@@ -5,7 +5,6 @@ import random
 import cv2
 import numpy as np
 from PIL import Image, ImageEnhance, ImageOps
-from bbox_util import *
 
 # This signifies the max integer that the controller RNN could predict for the
 # augmentation scheme.
