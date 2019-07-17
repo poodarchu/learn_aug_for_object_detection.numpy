@@ -5,7 +5,6 @@ import random
 import cv2
 import numpy as np
 from PIL import Image, ImageEnhance, ImageOps
-from bbox_util import *
 
 # This signifies the max integer that the controller RNN could predict for the
 # augmentation scheme.
@@ -15,6 +14,24 @@ _MAX_LEVEL = 10.
 # Represents an invalid bounding box that is used for checking for padding
 # lists of bounding box coordinates for a few augmentation operations
 _INVALID_BOX = [[-1.0, -1.0, -1.0, -1.0, -1, -1, -1]]
+
+def policy_custom():
+  """Autoaugment policy that was used in AutoAugment Detection Paper."""
+  # Each tuple is an augmentation operation of the form
+  # (operation, probability, magnitude). Each element in policy is a
+  # sub-policy that will be applied sequentially on the image.
+  policy = [
+      [('TranslateX_BBox', 0.6, 3), ('Equalize', 0.8, 2)],
+      [('Cutout', 0.8, 4), ('Color', 0.5, 3)],
+      [('Sharpness', 0.6, 5), ('ShearX_BBox', 0.4, 1)],
+      [('ShearY_BBox', 0.4, 2), ('Equalize_Only_BBoxes', 0.6, 2)],
+      [('SolarizeAdd', 0.6, 1), ('Brightness', 0.8, 3)],
+      [('TranslateY_Only_BBoxes', 0.2, 1), ('Cutout', 0.8, 5)],
+      [('Cutout_Only_BBoxes', 0.4, 2), ('TranslateY_Only_BBoxes', 0.8, 1)],
+      [('Cutout', 0.2, 2), ('Brightness', 0.8, 3)],
+      [('Brightness', 0.8, 3), ('AutoContrast', 0.4, 2), ('Brightness', 0.2, 2)],
+  ]
+  return policy
 
 def policy_v0():
   """Autoaugment policy that was used in AutoAugment Detection Paper."""
@@ -423,6 +440,7 @@ def _check_bbox_area(min_y, min_x, max_y, max_x, delta=0.05):
   """
   height = max_y - min_y
   width = max_x - min_x
+
   def _adjust_bbox_boundaries(min_coord, max_coord):
     # Make sure max is never 0 and min is never 1.
     max_coord = max(max_coord, 0.0 + delta)
@@ -774,6 +792,9 @@ def _rotate_bbox(bbox, image_height, image_width, degrees):
   max_y = -(float(np.min(new_coords[0, :])) / image_height - 0.5)
   max_x = float(np.max(new_coords[1, :])) / image_width + 0.5
 
+  if max_x < 0. or min_x > 1.0 or max_y < 0. or min_y > 1.0:
+      return None
+
   # Clip the bboxes to be sure the fall between [0, 1].
   min_y, min_x, max_y, max_x = _clip_bbox(min_y, min_x, max_y, max_x)
   min_y, min_x, max_y, max_x = _check_bbox_area(min_y, min_x, max_y, max_x)
@@ -806,7 +827,7 @@ def rotate_with_bboxes(image, bboxes, degrees, replace):
   wrapped_rotate_bbox = lambda bbox: _rotate_bbox(
       bbox, image_height, image_width, degrees)
   # pylint:enable=g-long-lambda
-  bboxes = np.array(list(map(wrapped_rotate_bbox, bboxes)))
+  bboxes = np.array([box for box in list(map(wrapped_rotate_bbox, bboxes)) if box is not None])
 
   return image.astype(np.uint8), bboxes
 
@@ -868,6 +889,9 @@ def _shift_bbox(bbox, image_height, image_width, pixels, shift_horizontal):
   max_y = float(max_y) / float(image_height)
   max_x = float(max_x) / float(image_width)
 
+  if max_x < 0. or min_x > 1.0 or max_y < 0. or min_y > 1.0:
+      return None
+
   # Clip the bboxes to be sure the fall between [0, 1].
   min_y, min_x, max_y, max_x = _clip_bbox(min_y, min_x, max_y, max_x)
   min_y, min_x, max_y, max_x = _check_bbox_area(min_y, min_x, max_y, max_x)
@@ -901,7 +925,8 @@ def translate_bbox(image, bboxes, pixels, replace, shift_horizontal):
   # pylint:disable=g-long-lambda
   wrapped_shift_bbox = lambda bbox: _shift_bbox(bbox, image_height, image_width, pixels, shift_horizontal)
   # pylint:enable=g-long-lambda
-  bboxes = np.array(list(map(wrapped_shift_bbox, bboxes)))
+  bboxes = np.array([box for box in list(map(wrapped_shift_bbox, bboxes)) if box is not None])
+
   return image, bboxes
 
 
@@ -976,6 +1001,9 @@ def _shear_bbox(bbox, image_height, image_width, level, shear_horizontal):
   max_y = float(np.max(new_coords[0, :])) / image_height
   max_x = float(np.max(new_coords[1, :])) / image_width
 
+  if max_x < 0. or min_x > 1.0 or max_y < 0. or min_y > 1.0:
+      return None
+
   # Clip the bboxes to be sure the fall between [0, 1].
   min_y, min_x, max_y, max_x = _clip_bbox(min_y, min_x, max_y, max_x)
   min_y, min_x, max_y, max_x = _check_bbox_area(min_y, min_x, max_y, max_x)
@@ -1011,7 +1039,7 @@ def shear_with_bboxes(image, bboxes, level, replace, shear_horizontal):
   wrapped_shear_bbox = lambda bbox: _shear_bbox(
       bbox, image_height, image_width, level, shear_horizontal)
   # pylint:enable=g-long-lambda
-  bboxes = np.array(list(map(wrapped_shear_bbox, bboxes)))
+  bboxes = np.array([box for box in list(map(wrapped_shear_bbox, bboxes)) if box is not None])
   return image, bboxes
 
 
@@ -1496,7 +1524,8 @@ def distort_image_with_autoaugment(image, bboxes, augmentation_name):
     A tuple containing the augmented versions of `image` and `bboxes`.
   """
   available_policies = {'v0': policy_v0, 'v1': policy_v1, 'v2': policy_v2,
-                        'v3': policy_v3, 'test': policy_vtest}
+                        'v3': policy_v3, 'test': policy_vtest,
+                        'custom': policy_custom}
   if augmentation_name not in available_policies:
     raise ValueError('Invalid augmentation_name: {}'.format(augmentation_name))
 
