@@ -55,17 +55,17 @@ def _shift_bbox(bbox, image_height, image_width, pixels, shift_horizontal):
 ```
 
 for example, the original image is 
-COCO_train2014_000000064241.png
+![](./imgs/COCO_train2014_000000064241.png)
 if I do translation_x of magnitude 10, the 'surfboard' will be wrong, 
-COCO_train2014_000000064241_aug.png
+![](./imgs/COCO_train2014_000000064241_aug.png)
 
 this bug exist in all operations that will change bbox's location( shift, shear, rotate)
 
 2. for those bbox-only transforms, like bbox_only_translate_x/y, if there are smaller bboxes inside the target bbox, those smaller bboxes inside don't move together with the target bbox. for example:
 original image:
-COCO_train2014_000000576218.png
+![](./imgs/COCO_train2014_000000576218.png)
 after bbox only translation y:
-COCO_train2014_000000576218_aug.png
+![](./imgs/COCO_train2014_000000576218_aug.png)
 due to the 'person' box is moved upward, the 'hot dog' in his hand also moves upward, but 'hot dog' bbox still locates at it's original position, so this cause label to be wrong.
 3. operations like cutout will cover some small bboxes, but it doesn't move those covered bbox.
 
